@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translateX(0px);
+  }
+  50% {
+    transform: translateX(10px);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.75;
+  }
+}
+
+@keyframes sheen {
+  0% {
+    transform: translateX(-18%);
+    opacity: 0.2;
+  }
+  50% {
+    transform: translateX(8%);
+    opacity: 0.36;
+  }
+  100% {
+    transform: translateX(18%);
+    opacity: 0.2;
+  }
+}
+
+.animate-float {
+  animation: float 8s ease-in-out infinite;
+}
+
+.animate-drift {
+  animation: drift 12s ease-in-out infinite;
+}
+
+.animate-breathe {
+  animation: breathe 9s ease-in-out infinite;
+}
+
+.animate-sheen {
+  animation: sheen 10s ease-in-out infinite;
+}
