@@ -1,64 +1,249 @@
 @import "tailwindcss";
 
+/* ============================================
+   ANIMATION KEYFRAMES
+   ============================================ */
+
 @keyframes float {
   0%,
   100% {
-    transform: translateY(0px);
+    transform: translateY(0) translateZ(0);
   }
   50% {
-    transform: translateY(-8px);
+    transform: translateY(-8px) translateZ(0);
   }
 }
 
 @keyframes drift {
   0%,
   100% {
-    transform: translateX(0px);
+    transform: translateX(0) translateZ(0);
   }
   50% {
-    transform: translateX(10px);
+    transform: translateX(10px) translateZ(0);
   }
 }
 
 @keyframes breathe {
   0%,
   100% {
-    transform: scale(1);
+    transform: scale(1) translateZ(0);
     opacity: 0.5;
   }
   50% {
-    transform: scale(1.08);
+    transform: scale(1.08) translateZ(0);
     opacity: 0.75;
   }
 }
 
 @keyframes sheen {
   0% {
-    transform: translateX(-18%);
+    transform: translateX(-18%) translateZ(0);
     opacity: 0.2;
   }
   50% {
-    transform: translateX(8%);
+    transform: translateX(8%) translateZ(0);
     opacity: 0.36;
   }
   100% {
-    transform: translateX(18%);
+    transform: translateX(18%) translateZ(0);
     opacity: 0.2;
   }
 }
 
+/* ============================================
+   ANIMATION CLASSES
+   ============================================ */
+
 .animate-float {
   animation: float 8s ease-in-out infinite;
+  will-change: transform;
 }
 
 .animate-drift {
   animation: drift 12s ease-in-out infinite;
+  will-change: transform;
 }
 
 .animate-breathe {
   animation: breathe 9s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 
 .animate-sheen {
   animation: sheen 10s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* ============================================
+   BOOK-LIKE LAYOUT STYLES
+   ============================================ */
+
+/* Clearfix for float */
+.clearfix::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+/* Book content wrapper */
+.book-content {
+  line-height: 1.85;
+}
+
+/* Clear both utility */
+.clear-both {
+  clear: both;
+}
+
+/* Book-like text styling */
+.book-text p {
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  -ms-hyphens: auto;
+  word-spacing: -0.05em;
+}
+
+/* First line indent for paragraphs (optional - uncomment if wanted) */
+/*
+.book-text p + p {
+  text-indent: 2em;
+}
+*/
+
+/* Better paragraph spacing */
+.book-text p:not(:last-child) {
+  margin-bottom: 1.25rem;
+}
+
+/* Shape outside for more organic text flow (modern browsers) */
+@supports (shape-outside: margin-box) {
+  .book-content > div:first-child {
+    shape-outside: margin-box;
+    shape-margin: 1rem;
+  }
+}
+
+/* ============================================
+   DROP CAP STYLING
+   ============================================ */
+
+.book-text p:first-of-type > span:first-child {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #8a6a45;
+  line-height: 0.8;
+  padding-right: 0.15em;
+  padding-top: 0.05em;
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+
+@media (max-width: 639px) {
+  /* On mobile, images are full width, no float */
+  .book-content > div:first-child {
+    float: none !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-bottom: 1.5rem;
+  }
+  
+  /* Remove justify on mobile for better readability */
+  .book-text p {
+    text-align: left;
+    hyphens: none;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  /* Tablet adjustments */
+  .book-content > div:first-child {
+    max-width: 45%;
+  }
+}
+
+/* ============================================
+   PERFORMANCE & ACCESSIBILITY
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-drift,
+  .animate-breathe,
+  .animate-sheen {
+    animation: none;
+  }
+}
+
+/* Smooth scroll */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Better text rendering */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Focus visible */
+*:focus-visible {
+  outline: 2px solid #8a6a45;
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* Selection */
+::selection {
+  background-color: #d4a75f;
+  color: #2f2318;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f8f1e4;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ccb48b;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8a6a45;
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+  .animate-float,
+  .animate-drift,
+  .animate-breathe,
+  .animate-sheen {
+    animation: none;
+  }
+
+  button {
+    display: none !important;
+  }
+
+  section {
+    page-break-inside: avoid;
+  }
+
+  .book-content > div:first-child {
+    max-width: 40%;
+  }
 }

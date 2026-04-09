@@ -9,7 +9,6 @@ function splitNarrationText(text: string, maxChars = 180) {
     return [] as string[];
   }
 
-  // Split berdasarkan kalimat terlebih dahulu
   const sentences = normalized.match(/[^.!?]+[.!?]+/g) ?? [normalized];
   const chunks: string[] = [];
   let currentChunk = "";
@@ -28,17 +27,14 @@ function splitNarrationText(text: string, maxChars = 180) {
       continue;
     }
 
-    // Jika kalimat tunggal terlalu panjang, pecah berdasarkan koma atau spasi
     if (cleanSentence.length > maxChars) {
       pushChunk();
       
-      // Coba pecah berdasarkan koma
       const subParts = cleanSentence.split(/,\s*/);
       let subChunk = "";
       
       for (const part of subParts) {
         if (part.length > maxChars) {
-          // Pecah berdasarkan kata
           if (subChunk) {
             chunks.push(subChunk.trim());
             subChunk = "";
@@ -113,19 +109,21 @@ function useSpeechSynthesis() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const keepAliveRef = useRef<NodeJS.Timeout | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 3;
 
   const speechSupported =
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
 
-  // Load voices
   useEffect(() => {
     if (!speechSupported) return;
 
     const loadVoices = () => {
       const voices = window.speechSynthesis.getVoices();
-      // Prioritas: id-ID, kemudian bahasa Indonesia lainnya
+      if (voices.length === 0) return;
+
       voiceRef.current = 
         voices.find((v) => v.lang === "id-ID") ??
         voices.find((v) => v.lang.startsWith("id")) ??
@@ -135,14 +133,19 @@ function useSpeechSynthesis() {
     };
 
     loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    if (!voiceRef.current) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = null;
+      };
+    }
 
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
     };
   }, [speechSupported]);
 
-  // Chrome bug workaround: Keep-alive interval
   useEffect(() => {
     if (!speechSupported || ttsState !== "playing") {
       if (keepAliveRef.current) {
@@ -152,14 +155,12 @@ function useSpeechSynthesis() {
       return;
     }
 
-    // Chrome akan menghentikan speech setelah ~15 detik
-    // Workaround: pause dan resume secara berkala
     keepAliveRef.current = setInterval(() => {
       if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
         window.speechSynthesis.pause();
         window.speechSynthesis.resume();
       }
-    }, 5000); // Setiap 5 detik
+    }, 10000);
 
     return () => {
       if (keepAliveRef.current) {
@@ -169,7 +170,6 @@ function useSpeechSynthesis() {
     };
   }, [speechSupported, ttsState]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (speechSupported) {
@@ -187,12 +187,12 @@ function useSpeechSynthesis() {
     
     const chunks = chunksRef.current;
     if (index >= chunks.length) {
-      // Selesai semua chunks
       setTtsState("idle");
       setActiveStorySlug(null);
       setCurrentChunkIndex(0);
       chunksRef.current = [];
       currentIndexRef.current = 0;
+      retryCountRef.current = 0;
       return;
     }
 
@@ -211,42 +211,54 @@ function useSpeechSynthesis() {
     utterance.onstart = () => {
       if (isStoppingRef.current) return;
       setCurrentChunkIndex(index + 1);
+      retryCountRef.current = 0;
     };
 
     utterance.onend = () => {
       if (isStoppingRef.current) return;
       currentIndexRef.current = index + 1;
-      // Delay kecil sebelum chunk berikutnya untuk stabilitas
+      retryCountRef.current = 0;
       setTimeout(() => {
         if (!isStoppingRef.current) {
           speakChunk(index + 1);
         }
-      }, 100);
+      }, 150);
     };
 
     utterance.onerror = (event) => {
-      console.error("Speech error:", event.error);
+      console.error("Speech error:", event.error, "at chunk", index);
       
-      // Jika error bukan karena interrupted, coba lanjutkan
+      if (
+        (event.error === "network" || event.error === "synthesis-failed") && 
+        retryCountRef.current < MAX_RETRIES &&
+        !isStoppingRef.current
+      ) {
+        retryCountRef.current++;
+        setTimeout(() => {
+          if (!isStoppingRef.current) {
+            speakChunk(index);
+          }
+        }, 500 * retryCountRef.current);
+        return;
+      }
+      
       if (event.error !== "interrupted" && !isStoppingRef.current) {
+        retryCountRef.current = 0;
+        currentIndexRef.current = index + 1;
         setTimeout(() => {
           if (!isStoppingRef.current) {
             speakChunk(index + 1);
           }
         }, 200);
       } else if (event.error === "interrupted" && !isStoppingRef.current) {
-        // Interrupted tapi bukan karena stop manual
         setTtsState("idle");
         setActiveStorySlug(null);
       }
     };
 
     utteranceRef.current = utterance;
-    
-    // Cancel any pending speech before speaking new chunk
     window.speechSynthesis.cancel();
     
-    // Small delay to ensure cancel is processed
     setTimeout(() => {
       if (!isStoppingRef.current) {
         window.speechSynthesis.speak(utterance);
@@ -257,11 +269,10 @@ function useSpeechSynthesis() {
   const startNarration = useCallback((story: Story) => {
     if (!speechSupported) return;
 
-    // Stop any current narration
     isStoppingRef.current = true;
     window.speechSynthesis.cancel();
+    retryCountRef.current = 0;
     
-    // Reset state
     setTimeout(() => {
       isStoppingRef.current = false;
 
@@ -290,13 +301,13 @@ function useSpeechSynthesis() {
     chunksRef.current = [];
     currentIndexRef.current = 0;
     utteranceRef.current = null;
+    retryCountRef.current = 0;
     
     setTtsState("idle");
     setActiveStorySlug(null);
     setCurrentChunkIndex(0);
     setTotalChunks(0);
 
-    // Reset flag setelah delay
     setTimeout(() => {
       isStoppingRef.current = false;
     }, 100);
@@ -317,7 +328,6 @@ function useSpeechSynthesis() {
       window.speechSynthesis.resume();
       setTtsState("playing");
     } else if (ttsState === "paused" && chunksRef.current.length > 0) {
-      // Jika speech sudah di-cancel tapi masih dalam state paused, restart dari chunk terakhir
       setTtsState("playing");
       speakChunk(currentIndexRef.current);
     }
@@ -500,121 +510,158 @@ function ChapterSection({
 
   return (
     <section id={story.slug} className="scroll-mt-24 border-t border-[#ccb48b]/55 py-12 lg:py-14">
-      <div
-        className={`flex flex-col gap-8 lg:items-start ${reverse ? "lg:flex-row-reverse" : "lg:flex-row"}`}
-      >
-        <div className="flex-1">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.42em] text-[#8a6a45]">
-              Bab {String(story.number).padStart(2, "0")}
-            </p>
-            <h3 className="mt-4 font-serif text-4xl font-semibold tracking-tight text-[#2f2318] sm:text-5xl">
-              {story.name}
-            </h3>
-            <p className="mt-4 text-lg leading-8 text-[#6a5743]">{story.subtitle}</p>
+      {/* Header Section - Full Width */}
+      <div className="mb-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.42em] text-[#8a6a45]">
+          Bab {String(story.number).padStart(2, "0")}
+        </p>
+        <h3 className="mt-4 font-serif text-4xl font-semibold tracking-tight text-[#2f2318] sm:text-5xl">
+          {story.name}
+        </h3>
+        <p className="mt-4 text-lg leading-8 text-[#6a5743]">{story.subtitle}</p>
 
-            <div className="mt-5 space-y-3">
-              <div className="flex flex-wrap items-center gap-3">
-                {!isActive && (
-                  <button
-                    type="button"
-                    onClick={onStartNarration}
-                    disabled={!speechSupported}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#3f2e21] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#f8f1e4] transition hover:bg-[#281a11] disabled:cursor-not-allowed disabled:bg-[#9a876f]"
-                  >
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    Dengarkan kisah
-                  </button>
-                )}
+        {/* Audio Controls */}
+        <div className="mt-5 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {!isActive && (
+              <button
+                type="button"
+                onClick={onStartNarration}
+                disabled={!speechSupported}
+                className="inline-flex items-center gap-2 rounded-full bg-[#3f2e21] px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#f8f1e4] transition hover:bg-[#281a11] disabled:cursor-not-allowed disabled:bg-[#9a876f] disabled:opacity-50"
+                aria-label="Dengarkan narasi kisah ini"
+              >
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Dengarkan kisah
+              </button>
+            )}
 
-                {isActive && ttsState === "playing" && (
-                  <button
-                    type="button"
-                    onClick={onPauseNarration}
-                    className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
-                  >
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                    </svg>
-                    Jeda
-                  </button>
-                )}
+            {isActive && ttsState === "playing" && (
+              <button
+                type="button"
+                onClick={onPauseNarration}
+                className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
+                aria-label="Jeda narasi"
+              >
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                </svg>
+                Jeda
+              </button>
+            )}
 
-                {isActive && ttsState === "paused" && (
-                  <button
-                    type="button"
-                    onClick={onResumeNarration}
-                    className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
-                  >
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    Lanjutkan
-                  </button>
-                )}
+            {isActive && ttsState === "paused" && (
+              <button
+                type="button"
+                onClick={onResumeNarration}
+                className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
+                aria-label="Lanjutkan narasi"
+              >
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Lanjutkan
+              </button>
+            )}
 
-                {isActive && ttsState !== "idle" && (
-                  <button
-                    type="button"
-                    onClick={onStopNarration}
-                    className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
-                  >
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 6h12v12H6z" />
-                    </svg>
-                    Stop
-                  </button>
-                )}
+            {isActive && ttsState !== "idle" && (
+              <button
+                type="button"
+                onClick={onStopNarration}
+                className="inline-flex items-center gap-2 rounded-full border border-[#8c6c44]/35 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#3e2d1d] transition hover:border-[#7d5f3a]"
+                aria-label="Stop narasi"
+              >
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 6h12v12H6z" />
+                </svg>
+                Stop
+              </button>
+            )}
+          </div>
+
+          {/* Progress bar */}
+          {isActive && ttsState !== "idle" && (
+            <div className="max-w-md space-y-1">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[#e0d3c0]">
+                <div
+                  className="h-full rounded-full bg-[#8a6a45] transition-all duration-300 ease-out"
+                  style={{ width: `${progress}%` }}
+                  role="progressbar"
+                  aria-valuenow={progress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                />
               </div>
-
-              {/* Progress bar untuk narasi aktif */}
-              {isActive && ttsState !== "idle" && (
-                <div className="max-w-md space-y-1">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-[#e0d3c0]">
-                    <div
-                      className="h-full rounded-full bg-[#8a6a45] transition-all duration-300 ease-out"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-[#8a6a45]">
-                    {ttsState === "playing" ? "Sedang membacakan" : "Dijeda"} — {progress}%
-                    {ttsState === "playing" && (
-                      <span className="ml-2 inline-flex items-center gap-1">
-                        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
-                        <span className="text-green-700">aktif</span>
-                      </span>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              <p className="text-xs leading-6 text-[#735f4a]">
-                {speechSupported
-                  ? isActive && ttsState !== "idle"
-                    ? "Audio sedang diputar. Klik Jeda untuk pause, atau Stop untuk berhenti."
-                    : "Gunakan tombol audio untuk membacakan kisah secara otomatis."
-                  : "Browser ini belum mendukung fitur audio otomatis (Text-to-Speech)."}
+              <p className="text-xs text-[#8a6a45]">
+                {ttsState === "playing" ? "Sedang membacakan" : "Dijeda"} — {progress}%
+                {ttsState === "playing" && (
+                  <span className="ml-2 inline-flex items-center gap-1">
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
+                    <span className="text-green-700">aktif</span>
+                  </span>
+                )}
               </p>
             </div>
+          )}
 
-            <div className="mt-7 space-y-5 text-[1.04rem] leading-8 text-[#4f4132]">
-              {story.paragraphs.map((paragraph, idx) => (
-                <p key={`${story.slug}-p-${idx}`}>{paragraph}</p>
-              ))}
-            </div>
-
-            <p className="mt-7 border-l-2 border-[#b98a4f] pl-4 text-[1.02rem] italic leading-8 text-[#6f5b42]">
-              {story.lesson}
-            </p>
-          </div>
+          <p className="text-xs leading-6 text-[#735f4a]">
+            {speechSupported
+              ? isActive && ttsState !== "idle"
+                ? "Audio sedang diputar. Klik Jeda untuk pause, atau Stop untuk berhenti."
+                : "Gunakan tombol audio untuk membacakan kisah secara otomatis."
+              : "Browser ini belum mendukung fitur audio otomatis (Text-to-Speech)."}
+          </p>
         </div>
+      </div>
 
-        <div className="w-full lg:w-[420px]">
+      {/* Content Section - Book-like Layout with Float */}
+      <div className="book-content clearfix">
+        {/* Floating Image */}
+        <div 
+          className={`
+            mb-6 w-full
+            sm:mb-4 sm:w-[320px]
+            lg:w-[380px]
+            ${reverse 
+              ? "sm:float-left sm:mr-8 sm:ml-0" 
+              : "sm:float-right sm:ml-8 sm:mr-0"
+            }
+          `}
+        >
           <div className="animate-float">
             <StoryVisual scene={story} label={`Ilustrasi simbolik ${story.name}`} />
           </div>
+        </div>
+
+        {/* Text Content - Flows around the image */}
+        <div className="book-text text-[1.04rem] leading-8 text-[#4f4132]">
+          {story.paragraphs.map((paragraph, idx) => (
+            <p key={`${story.slug}-p-${idx}`} className="mb-5 text-justify hyphens-auto">
+              {/* Drop cap for first paragraph */}
+              {idx === 0 ? (
+                <>
+                  <span className="float-left mr-2 mt-1 font-serif text-5xl font-bold leading-[0.8] text-[#8a6a45]">
+                    {paragraph.charAt(0)}
+                  </span>
+                  {paragraph.slice(1)}
+                </>
+              ) : (
+                paragraph
+              )}
+            </p>
+          ))}
+        </div>
+
+        {/* Lesson - Full width after clearing float */}
+        <div className="clear-both pt-4">
+          <p className="border-l-4 border-[#b98a4f] bg-gradient-to-r from-[#f8f1e4]/50 to-transparent py-4 pl-5 pr-4 text-[1.02rem] italic leading-8 text-[#6f5b42]">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.3em] text-[#8a6a45] not-italic">
+              Pelajaran
+            </span>
+            {story.lesson}
+          </p>
         </div>
       </div>
     </section>
@@ -625,8 +672,7 @@ function resolveImagePath(path: string | undefined) {
   if (!path) return undefined;
   if (path.startsWith("http") || path.startsWith("data:")) return path;
 
-  // GitHub Pages fix: prepend base URL to absolute paths
-  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   return `${base}${cleanPath}`;
 }
@@ -650,7 +696,7 @@ function StoryVisual({
           <img
             src={resolveImagePath(scene.image)}
             alt={label}
-            className={`${hero ? "h-[42rem]" : "h-[28rem]"} w-full object-cover`}
+            className={`${hero ? "h-[42rem]" : "h-auto max-h-[28rem]"} w-full object-cover`}
             onError={() => setFailed(true)}
             loading="lazy"
           />
@@ -659,7 +705,7 @@ function StoryVisual({
         <SceneArt scene={scene} label={label} hero={hero} />
       )}
 
-      <figcaption className="mt-3 text-xs font-semibold uppercase tracking-[0.34em] text-[#8a6a45]">
+      <figcaption className="mt-3 text-center text-xs font-semibold uppercase tracking-[0.34em] text-[#8a6a45]">
         {label}
       </figcaption>
     </figure>
@@ -682,8 +728,10 @@ function SceneArt({
     <div aria-label={label} className="relative isolate overflow-hidden rounded-[2rem] border border-[#d9bf98] bg-[#1f160f] shadow-[0_26px_70px_rgba(68,42,14,0.16)]">
       <svg
         viewBox="0 0 800 1000"
-        className={`${hero ? "h-[42rem]" : "h-[28rem]"} w-full`}
+        className={`${hero ? "h-[42rem]" : "h-auto max-h-[28rem]"} w-full`}
         preserveAspectRatio="xMidYMid slice"
+        role="img"
+        aria-label={label}
       >
         <defs>
           <linearGradient id={`${id}-bg`} x1="0%" y1="0%" x2="100%" y2="100%">
