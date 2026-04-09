@@ -411,9 +411,12 @@ export default function App() {
                 </a>
               </div>
               <p className="mt-8 max-w-xl text-sm leading-7 text-[#73604c]">
-                Catatan: foto dapat ditambahkan per nabi lewat file masing-masing. Jika foto belum
-                ada, sistem akan menampilkan ilustrasi simbolik otomatis.
-              </p>
+              Jika Anda berkenan untuk mendukung karya saya, Anda dapat berdonasi melalui Dana di nomor berikut:
+             <br />
+              <span className="font-semibold">💳 Dana: 0857-6525-2665</span>
+             <br />
+                Terima kasih atas dukungan dan kebaikan Anda 🙏
+               </p>
             </div>
 
             <div className="w-full max-w-xl flex-shrink-0 lg:w-[44rem]">
