@@ -621,6 +621,16 @@ function ChapterSection({
   );
 }
 
+function resolveImagePath(path: string | undefined) {
+  if (!path) return undefined;
+  if (path.startsWith("http") || path.startsWith("data:")) return path;
+
+  // GitHub Pages fix: prepend base URL to absolute paths
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+
 function StoryVisual({
   scene,
   label,
@@ -638,7 +648,7 @@ function StoryVisual({
       {showImage ? (
         <div className="relative isolate overflow-hidden rounded-[2rem] border border-[#d9bf98] bg-[#1f160f] shadow-[0_26px_70px_rgba(68,42,14,0.16)]">
           <img
-            src={scene.image}
+            src={resolveImagePath(scene.image)}
             alt={label}
             className={`${hero ? "h-[42rem]" : "h-[28rem]"} w-full object-cover`}
             onError={() => setFailed(true)}
